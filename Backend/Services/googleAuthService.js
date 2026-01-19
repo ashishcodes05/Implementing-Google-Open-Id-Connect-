@@ -1,20 +1,27 @@
+import { OAuth2Client } from "google-auth-library";
+
 const clientId = process.env.CLIENT_ID;
 const clientSecret = process.env.CLIENT_SECRET;
 const redirectURI = "http://localhost:4000/auth/google/callback";
 
+const client = new OAuth2Client({
+    clientId,
+    clientSecret,
+    redirectUri: redirectURI
+});
+
 export const fetchUserDataFromGoogle = async(code) => {
-    const payload = `code=${code}&client_id=${clientId}&client_secret=${clientSecret}&redirect_uri=${redirectURI}&grant_type=authorization_code`
-    const response = await fetch("https://oauth2.googleapis.com/token", {
-        method: "POST",
-        headers: {
-            "Content-Type": "application/x-www-form-urlencoded"
-        },
-        body: payload
+    const { tokens } = await client.getToken(code);
+    const loginTicket = await client.verifyIdToken({
+        idToken: tokens.id_token,
+        audience: clientId
     })
-    const data = await response.json();
-    console.log(data)
-    const userToken = data.id_token.split('.')[1];
-    const userData = JSON.parse(atob(userToken));
-    console.log(userData)
+    const userData = loginTicket.getPayload();
     return userData;
+}
+
+export const getGoogleAuthURI = () => {
+    return client.generateAuthUrl({
+        scope: ["openid", "email", "profile"],
+    })
 }

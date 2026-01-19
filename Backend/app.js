@@ -1,7 +1,7 @@
 import express from "express";
 import cors from "cors"
 import "dotenv/config"
-import { fetchUserDataFromGoogle } from "./Services/googleAuthService.js";
+import { fetchUserDataFromGoogle, getGoogleAuthURI } from "./Services/googleAuthService.js";
 import { writeFile } from "fs/promises"
 import users from "./usersDB.json" with {type: "json"}
 import sessions from "./sessionsDB.json" with {type: "json"}
@@ -18,45 +18,47 @@ app.use(express.json());
 app.use(cookieParser());
 
 app.get('/auth/google', (req, res) => {
-    const clientId = process.env.CLIENT_ID;
-    const redirectURI = "http://localhost:4000/auth/google/callback";
-    const authURI = `https://accounts.google.com/o/oauth2/v2/auth?response_type=code&client_id=${clientId}&scope=openid%20email%20profile&redirect_uri=${redirectURI}`
+    const authURI = getGoogleAuthURI();
     res.redirect(authURI);
     return res.end();
 })
 
-app.get("/auth/google/callback", async(req, res) => {
-    const { code } = req.query;
-    const { sid } = req.cookies;
-    const existingSession = sessions.find(({id}) => id === sid);
-    if(existingSession){
-        return res.status(401).json({message: "User Already logged in"})
-    }
-    console.log(code)
-    const userData = await fetchUserDataFromGoogle(code);
-    const {email, name, sub : id, picture} = userData;
-    const existingUser = users.find((user) => user.id === id)
-    if(existingUser){
-        const id = crypto.randomUUID();
-        sessions.push({id, userId: existingUser.id});
+app.get("/auth/google/callback", async (req, res) => {
+    try {
+        const { code } = req.query;
+        const { sid } = req.cookies;
+        const existingSession = sessions.find(({ id }) => id === sid);
+        if (existingSession) {
+            return res.status(401).json({ message: "User Already logged in" })
+        }
+        const userData = await fetchUserDataFromGoogle(code);
+        const { email, name, sub: id, picture } = userData;
+        const existingUser = users.find((user) => user.id === id)
+        if (existingUser) {
+            const id = crypto.randomUUID();
+            sessions.push({ id, userId: existingUser.id });
+            await writeFile("sessionsDB.json", JSON.stringify(sessions, null, 2));
+            res.redirect(`http://localhost:5500/callback.html?sid=${id}`);
+            res.status(200).end();
+        }
+        users.push({ id, email, name, picture });
+        const sessionId = crypto.randomUUID();
+        sessions.push({ id: sessionId, userId: id });
         await writeFile("sessionsDB.json", JSON.stringify(sessions, null, 2));
-        res.redirect(`http://localhost:5500/callback.html?sid=${id}`);
+        await writeFile("usersDB.json", JSON.stringify(users, null, 2));
+        res.redirect(`http://localhost:5500/callback.html?sid=${sessionId}`);
         res.status(200).end();
+    } catch (err) {
+        console.log(err)
+        return res.status(500).json({message: "Error has occured"})
     }
-    users.push({id, email, name, picture});
-    const sessionId = crypto.randomUUID();
-    sessions.push({id: sessionId, userId: id});
-    await writeFile("sessionsDB.json", JSON.stringify(sessions, null, 2));
-    await writeFile("usersDB.json", JSON.stringify(users, null, 2));
-    res.redirect(`http://localhost:5500/callback.html?sid=${sessionId}`);
-    res.status(200).end();
 })
 
 app.get("/profile", (req, res) => {
     const { sid } = req.cookies;
-    const existingSession = sessions.find(({id}) => id === sid);
-    if(!existingSession){
-        return res.status(401).json({message: "User not logged in"})
+    const existingSession = sessions.find(({ id }) => id === sid);
+    if (!existingSession) {
+        return res.status(401).json({ message: "User not logged in" })
     }
     const userId = existingSession.userId;
     const user = users.find((user) => user.id === userId)
@@ -73,16 +75,16 @@ app.get("/session-cookie", (req, res) => {
     res.status(200).end();
 })
 
-app.post("/logout", async(req, res) => {
+app.post("/logout", async (req, res) => {
     const { sid } = req.cookies;
-    const existingSessionIdx = sessions.findIndex(({id}) => id === sid);
-    if(existingSessionIdx === -1){
-        return res.status(401).json({message: "User not logged in"})
+    const existingSessionIdx = sessions.findIndex(({ id }) => id === sid);
+    if (existingSessionIdx === -1) {
+        return res.status(401).json({ message: "User not logged in" })
     }
     sessions.splice(existingSessionIdx, 1);
     await writeFile("sessionsDB.json", JSON.stringify(sessions, null, 2));
     res.clearCookie("sid")
-    return res.status(200).json({message: "User logout successfully"})
+    return res.status(200).json({ message: "User logout successfully" })
 })
 
 app.listen(PORT, () => {
